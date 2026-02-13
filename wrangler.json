@@ -1,0 +1,27 @@
+{
+    "name": "skive",
+    "compatibility_date": "2024-10-07",
+    "compatibility_flags": [
+        "nodejs_compat"
+    ],
+    "main": "src/worker/index.ts",
+    "durable_objects": {
+        "bindings": [
+            {
+                "name": "MEETING_ROOM",
+                "class_name": "MeetingRoom"
+            }
+        ]
+    },
+    "migrations": [
+        {
+            "tag": "v1",
+            "new_classes": [
+                "MeetingRoom"
+            ]
+        }
+    ],
+    "assets": {
+        "directory": "./out"
+    }
+}
