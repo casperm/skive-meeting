@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 
-export function useMediaDevices() {
+export function useMediaDevices(options?: { videoMaxFramerate?: number }) {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [audioEnabled, setAudioEnabled] = useState(true);
     const [videoEnabled, setVideoEnabled] = useState(true);
@@ -11,13 +11,17 @@ export function useMediaDevices() {
 
     const startMedia = useCallback(async () => {
         try {
+            const videoConstraints: MediaTrackConstraints = {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "user",
+            };
+            if (options?.videoMaxFramerate) {
+                videoConstraints.frameRate = { max: options.videoMaxFramerate };
+            }
             const mediaStream = await navigator.mediaDevices.getUserMedia({
                 audio: true,
-                video: {
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    facingMode: "user",
-                },
+                video: videoConstraints,
             });
             streamRef.current = mediaStream;
             setStream(mediaStream);

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Copy, Users, QrCode } from "lucide-react";
+import { Copy, Users, QrCode, Clock } from "lucide-react";
 import { VideoTile } from "@/components/VideoTile";
 import { ControlsBar } from "@/components/ControlsBar";
 import { Whiteboard } from "@/components/Whiteboard";
@@ -11,6 +11,12 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useMediaDevices } from "@/hooks/useMediaDevices";
 import { useCallsSfu } from "@/hooks/useCallsSfu";
 import type { MeetingState, UserInfo } from "@/worker/types";
+
+interface MeetingConfig {
+    videoCodec: string;
+    videoMaxFramerate: number;
+    callMaxDurationSeconds: number;
+}
 
 function MeetingRoomInner() {
     const searchParams = useSearchParams();
@@ -22,6 +28,15 @@ function MeetingRoomInner() {
     const [nameSubmitted, setNameSubmitted] = useState(false);
     const [nameInput, setNameInput] = useState("");
     const [copied, setCopied] = useState(false);
+
+    // Meeting config
+    const [config, setConfig] = useState<MeetingConfig | null>(null);
+
+    // Call timer
+    const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+    const [showTimesUp, setShowTimesUp] = useState(false);
+    const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+    const callStartedRef = useRef(false);
 
     // Meeting state
     const [roomState, setRoomState] = useState<MeetingState | null>(null);
@@ -38,6 +53,17 @@ function MeetingRoomInner() {
         button?: "up" | "down";
     }>>(new Map());
 
+    // Fetch meeting config on mount
+    useEffect(() => {
+        fetch(`${window.location.origin}/api/config`)
+            .then((res) => res.json())
+            .then((data: MeetingConfig) => setConfig(data))
+            .catch(() => {
+                // Fallback defaults
+                setConfig({ videoCodec: "av1", videoMaxFramerate: 24, callMaxDurationSeconds: 300 });
+            });
+    }, []);
+
     // Media
     const {
         stream: localStream,
@@ -47,7 +73,7 @@ function MeetingRoomInner() {
         toggleAudio,
         toggleVideo,
         stopMedia,
-    } = useMediaDevices();
+    } = useMediaDevices(config ? { videoMaxFramerate: config.videoMaxFramerate } : undefined);
 
     // Calls SFU
     const {
@@ -58,7 +84,7 @@ function MeetingRoomInner() {
         pullRemoteTracks,
         stopRemoteStream,
         cleanup: cleanupSfu,
-    } = useCallsSfu();
+    } = useCallsSfu(config ? { videoCodec: config.videoCodec } : undefined);
 
     // Track previous users for diffing remote tracks
     const prevUsersRef = useRef<UserInfo[]>([]);
@@ -135,6 +161,30 @@ function MeetingRoomInner() {
             })();
         }
     }, [localStream, sfuSessionId, nameSubmitted, createSession, pushLocalTracks, sendMessage]);
+
+    // Start call timer when call begins
+    useEffect(() => {
+        if (nameSubmitted && sfuSessionId && config && !callStartedRef.current) {
+            callStartedRef.current = true;
+            const duration = config.callMaxDurationSeconds;
+            setTimeRemaining(duration);
+
+            timerRef.current = setInterval(() => {
+                setTimeRemaining((prev) => {
+                    if (prev === null || prev <= 1) {
+                        clearInterval(timerRef.current);
+                        setShowTimesUp(true);
+                        return 0;
+                    }
+                    return prev - 1;
+                });
+            }, 1000);
+        }
+
+        return () => {
+            if (timerRef.current) clearInterval(timerRef.current);
+        };
+    }, [nameSubmitted, sfuSessionId, config]);
 
     // Track which tracks we've already requested to avoid redundant pulls
     const pulledTracksRef = useRef<Set<string>>(new Set());
@@ -238,11 +288,19 @@ function MeetingRoomInner() {
 
     // End call
     const handleEndCall = useCallback(() => {
+        if (timerRef.current) clearInterval(timerRef.current);
         sendMessage({ type: "userLeave" });
         stopMedia();
         cleanupSfu();
         router.push("/");
     }, [sendMessage, stopMedia, cleanupSfu, router]);
+
+    // Format timer as MM:SS
+    const formatTime = (seconds: number) => {
+        const m = Math.floor(seconds / 60).toString().padStart(2, "0");
+        const s = (seconds % 60).toString().padStart(2, "0");
+        return `${m}:${s}`;
+    };
 
     // Redirect if no meeting ID
     if (!meetingId) {
@@ -313,6 +371,12 @@ function MeetingRoomInner() {
             <div className="meeting-header">
                 <span className="meeting-header-logo">Skive</span>
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                    {timeRemaining !== null && (
+                        <div className={`call-timer ${timeRemaining <= 60 ? "call-timer--warning" : ""}`}>
+                            <Clock size={14} />
+                            <span>{formatTime(timeRemaining)}</span>
+                        </div>
+                    )}
                     <div className="participants-count">
                         <div className="dot-green" />
                         <Users size={14} />
@@ -395,6 +459,28 @@ function MeetingRoomInner() {
                 onToggleWhiteboard={() => setWhiteboardOpen((prev) => !prev)}
                 onEndCall={handleEndCall}
             />
+
+            {/* Time's Up Modal */}
+            {showTimesUp && (
+                <div className="modal-overlay">
+                    <div className="modal-card" style={{ textAlign: "center" }}>
+                        <div className="times-up-icon">
+                            <Clock size={48} />
+                        </div>
+                        <h2>Time&apos;s Up!</h2>
+                        <p>
+                            Your meeting has reached the {config ? Math.floor(config.callMaxDurationSeconds / 60) : 5}-minute limit.
+                        </p>
+                        <button
+                            className="btn btn-danger"
+                            style={{ width: "100%" }}
+                            onClick={handleEndCall}
+                        >
+                            Leave Meeting
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

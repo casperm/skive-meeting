@@ -21,6 +21,11 @@
             ]
         }
     ],
+    "vars": {
+        "VIDEO_CODEC": "av1",
+        "VIDEO_MAX_FRAMERATE": 24,
+        "CALL_MAX_DURATION_SECONDS": 300
+    },
     "assets": {
         "directory": "./out"
     },

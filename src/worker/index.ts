@@ -7,6 +7,9 @@ interface Env {
     CALLS_APP_ID: string;
     CALLS_APP_SECRET: string;
     MEETING_ROOM: DurableObjectNamespace;
+    VIDEO_CODEC: string;
+    VIDEO_MAX_FRAMERATE: string;
+    CALL_MAX_DURATION_SECONDS: string;
 }
 
 export default {
@@ -26,6 +29,15 @@ export default {
         }
 
         try {
+            // --- Public Config Route ---
+            if (path === "/api/config" && request.method === "GET") {
+                return Response.json({
+                    videoCodec: env.VIDEO_CODEC || "av1",
+                    videoMaxFramerate: parseInt(env.VIDEO_MAX_FRAMERATE || "24", 10),
+                    callMaxDurationSeconds: parseInt(env.CALL_MAX_DURATION_SECONDS || "300", 10),
+                }, { headers: corsHeaders });
+            }
+
             // --- Meeting API Routes ---
 
             // POST /api/meetings — create a new meeting

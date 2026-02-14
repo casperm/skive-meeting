@@ -14,7 +14,7 @@ interface RemoteStream {
     stream: MediaStream;
 }
 
-export function useCallsSfu() {
+export function useCallsSfu(options?: { videoCodec?: string }) {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [localTrackNames, setLocalTrackNames] = useState<{ audio?: string; video?: string }>({});
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
@@ -109,6 +109,26 @@ export function useCallsSfu() {
             localStream.getTracks().forEach((track) => {
                 const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
                 transceivers.push({ transceiver, kind: track.kind });
+
+                // Set codec preference for video tracks (e.g., AV1)
+                if (track.kind === "video" && options?.videoCodec) {
+                    try {
+                        const capabilities = RTCRtpReceiver.getCapabilities("video");
+                        if (capabilities) {
+                            const preferredCodec = capabilities.codecs.filter(
+                                (c) => c.mimeType.toLowerCase() === `video/${options.videoCodec}`
+                            );
+                            const otherCodecs = capabilities.codecs.filter(
+                                (c) => c.mimeType.toLowerCase() !== `video/${options.videoCodec}`
+                            );
+                            if (preferredCodec.length > 0) {
+                                transceiver.setCodecPreferences([...preferredCodec, ...otherCodecs]);
+                            }
+                        }
+                    } catch (err) {
+                        console.warn("Could not set codec preference:", err);
+                    }
+                }
             });
 
             // Create offer
