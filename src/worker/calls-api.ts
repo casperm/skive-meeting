@@ -25,11 +25,12 @@ async function callsApi(
     appId: string,
     appSecret: string,
     path: string,
+    method: string = "POST",
     body?: unknown
 ): Promise<unknown> {
     const url = `${CALLS_BASE_URL}/${appId}${path}`;
     const res = await fetch(url, {
-        method: "POST",
+        method,
         headers: {
             Authorization: `Bearer ${appSecret}`,
             "Content-Type": "application/json",
@@ -71,6 +72,7 @@ export async function pushTracks(
         appId,
         appSecret,
         `/sessions/${sessionId}/tracks/new`,
+        "POST",
         body
     ) as Promise<CallsTracksResponse>;
 }
@@ -88,6 +90,7 @@ export async function closeTracks(
         appId,
         appSecret,
         `/sessions/${sessionId}/tracks/close`,
+        "POST",
         body
     );
 }
@@ -98,7 +101,7 @@ export async function renegotiate(
     sessionId: string,
     sdp: { type: string; sdp: string }
 ): Promise<{ sessionDescription?: { type: string; sdp: string } }> {
-    return callsApi(appId, appSecret, `/sessions/${sessionId}/renegotiate`, {
+    return callsApi(appId, appSecret, `/sessions/${sessionId}/renegotiate`, "PUT", {
         sessionDescription: sdp,
     }) as Promise<{ sessionDescription?: { type: string; sdp: string } }>;
 }

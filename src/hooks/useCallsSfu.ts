@@ -78,135 +78,159 @@ export function useCallsSfu() {
         }
     }, []);
 
-    const pushLocalTracks = useCallback(async (localStream: MediaStream) => {
-        const pc = pcRef.current;
-        const sid = sessionIdRef.current;
-        if (!pc || !sid) return null;
+    const mutexRef = useRef<Promise<void>>(Promise.resolve());
 
-        // Add tracks to PeerConnection
-        const transceivers: Array<{ transceiver: RTCRtpTransceiver; kind: string }> = [];
-
-        localStream.getTracks().forEach((track) => {
-            const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
-            transceivers.push({ transceiver, kind: track.kind });
-        });
-
-        // Create offer
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        // Map transceivers to track names (MID is now available after setLocalDescription)
-        const tracks = transceivers.map(({ transceiver, kind }) => ({
-            location: "local",
-            trackName: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
-            mid: transceiver.mid ?? undefined,
-        }));
-
-        // Send to server
-        try {
-            const res = await fetch(`${API_BASE}/api/calls/tracks`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    sessionId: sid,
-                    sessionDescription: {
-                        type: offer.type,
-                        sdp: offer.sdp,
-                    },
-                    tracks,
-                }),
-            });
-
-            const data = await res.json();
-
-            // Set remote description (answer from SFU)
-            if (data.sessionDescription) {
-                await pc.setRemoteDescription(
-                    new RTCSessionDescription(data.sessionDescription)
-                );
+    const withMutex = useCallback(<T>(fn: () => Promise<T>): Promise<T | null> => {
+        const next = mutexRef.current.then(async () => {
+            try {
+                return await fn();
+            } catch (err) {
+                console.error("Error in SFU operation:", err);
+                throw err;
             }
+        }).catch(() => { }); // Catch errors in the chain so it doesn't break subsequent calls
 
-            // Track the names
-            const names: { audio?: string; video?: string } = {};
-            data.tracks?.forEach((t: { trackName: string; mid: string }) => {
-                const origTrack = tracks.find((lt) => lt.mid === t.mid);
-                if (origTrack?.trackName.startsWith("audio")) {
-                    names.audio = t.trackName;
-                } else {
-                    names.video = t.trackName;
-                }
-            });
-            setLocalTrackNames(names);
+        // Update the mutex to point to the new end of the chain (cast to void promise)
+        mutexRef.current = next as unknown as Promise<void>;
 
-            return { sessionId: sid, trackNames: names };
-        } catch (err) {
-            console.error("Failed to push tracks:", err);
-            return null;
-        }
+        // Return the result of the specific operation
+        return next as Promise<T | null>;
     }, []);
 
-    const pullRemoteTracks = useCallback(async (remoteTracks: TrackInfo[]) => {
-        const pc = pcRef.current;
-        const sid = sessionIdRef.current;
-        if (!pc || !sid || remoteTracks.length === 0) return;
+    const pushLocalTracks = useCallback(async (localStream: MediaStream) => {
+        return withMutex(async () => {
+            const pc = pcRef.current;
+            const sid = sessionIdRef.current;
+            if (!pc || !sid) return null;
 
-        const tracksToRequest = remoteTracks.map((t) => ({
-            location: "remote",
-            sessionId: t.sessionId,
-            trackName: t.trackName,
-        }));
+            // Add tracks to PeerConnection
+            const transceivers: Array<{ transceiver: RTCRtpTransceiver; kind: string }> = [];
 
-        try {
-            const res = await fetch(`${API_BASE}/api/calls/tracks`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    sessionId: sid,
-                    tracks: tracksToRequest,
-                }),
+            localStream.getTracks().forEach((track) => {
+                const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
+                transceivers.push({ transceiver, kind: track.kind });
             });
 
-            const data = await res.json();
+            // Create offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
 
-            // Map MIDs from the response to remote peer sessionIds
-            if (data.tracks) {
-                data.tracks.forEach((t: { mid: string; sessionId?: string }, index: number) => {
-                    const mid = t.mid;
-                    // The sessionId for this track comes from our original request
-                    const remoteSessionId = tracksToRequest[index]?.sessionId;
-                    if (mid && remoteSessionId) {
-                        midToSessionIdRef.current.set(mid, remoteSessionId);
-                    }
-                });
-            }
+            // Map transceivers to track names (MID is now available after setLocalDescription)
+            const tracks = transceivers.map(({ transceiver, kind }) => ({
+                location: "local",
+                trackName: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
+                mid: transceiver.mid ?? undefined,
+            }));
 
-            if (data.requiresImmediateRenegotiation && data.sessionDescription) {
-                // Set the new offer from SFU
-                await pc.setRemoteDescription(
-                    new RTCSessionDescription(data.sessionDescription)
-                );
-
-                // Create answer
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-
-                // Send answer back
-                await fetch(`${API_BASE}/api/calls/renegotiate`, {
+            // Send to server
+            try {
+                const res = await fetch(`${API_BASE}/api/calls/tracks`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         sessionId: sid,
                         sessionDescription: {
-                            type: answer.type,
-                            sdp: answer.sdp,
+                            type: offer.type,
+                            sdp: offer.sdp,
                         },
+                        tracks,
                     }),
                 });
+
+                const data = await res.json();
+
+                // Set remote description (answer from SFU)
+                if (data.sessionDescription) {
+                    await pc.setRemoteDescription(
+                        new RTCSessionDescription(data.sessionDescription)
+                    );
+                }
+
+                // Track the names
+                const names: { audio?: string; video?: string } = {};
+                data.tracks?.forEach((t: { trackName: string; mid: string }) => {
+                    const origTrack = tracks.find((lt) => lt.mid === t.mid);
+                    if (origTrack?.trackName.startsWith("audio")) {
+                        names.audio = t.trackName;
+                    } else {
+                        names.video = t.trackName;
+                    }
+                });
+                setLocalTrackNames(names);
+
+                return { sessionId: sid, trackNames: names };
+            } catch (err) {
+                console.error("Failed to push tracks:", err);
+                return null;
             }
-        } catch (err) {
-            console.error("Failed to pull remote tracks:", err);
-        }
-    }, []);
+        });
+    }, [withMutex]);
+
+    const pullRemoteTracks = useCallback(async (remoteTracks: TrackInfo[]) => {
+        return withMutex(async () => {
+            const pc = pcRef.current;
+            const sid = sessionIdRef.current;
+            if (!pc || !sid || remoteTracks.length === 0) return;
+
+            const tracksToRequest = remoteTracks.map((t) => ({
+                location: "remote",
+                sessionId: t.sessionId,
+                trackName: t.trackName,
+            }));
+
+            try {
+                const res = await fetch(`${API_BASE}/api/calls/tracks`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sessionId: sid,
+                        tracks: tracksToRequest,
+                    }),
+                });
+
+                const data = await res.json();
+
+                // Map MIDs from the response to remote peer sessionIds
+                if (data.tracks) {
+                    data.tracks.forEach((t: { mid: string; trackName: string }) => {
+                        const mid = t.mid;
+                        // The sessionId for this track comes from our original request, matched by trackName
+                        const originalRequest = tracksToRequest.find((req) => req.trackName === t.trackName);
+
+                        if (mid && originalRequest) {
+                            midToSessionIdRef.current.set(mid, originalRequest.sessionId);
+                        }
+                    });
+                }
+
+                if (data.requiresImmediateRenegotiation && data.sessionDescription) {
+                    // Set the new offer from SFU
+                    await pc.setRemoteDescription(
+                        new RTCSessionDescription(data.sessionDescription)
+                    );
+
+                    // Create answer
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+
+                    // Send answer back
+                    await fetch(`${API_BASE}/api/calls/renegotiate`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            sessionId: sid,
+                            sessionDescription: {
+                                type: answer.type,
+                                sdp: answer.sdp,
+                            },
+                        }),
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to pull remote tracks:", err);
+            }
+        });
+    }, [withMutex]);
 
     const stopRemoteStream = useCallback((peerId: string) => {
         const stream = peerStreamsRef.current.get(peerId);
