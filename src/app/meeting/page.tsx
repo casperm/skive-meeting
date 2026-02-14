@@ -37,6 +37,7 @@ function MeetingRoomInner() {
     const [showTimesUp, setShowTimesUp] = useState(false);
     const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
     const callStartedRef = useRef(false);
+    const disconnectRef = useRef<() => void>(() => {});
 
     // Meeting state
     const [roomState, setRoomState] = useState<MeetingState | null>(null);
@@ -162,6 +163,13 @@ function MeetingRoomInner() {
         }
     }, [localStream, sfuSessionId, nameSubmitted, createSession, pushLocalTracks, sendMessage]);
 
+    // Keep disconnect ref up to date
+    disconnectRef.current = () => {
+        sendMessage({ type: "userLeave" });
+        stopMedia();
+        cleanupSfu();
+    };
+
     // Start call timer when call begins
     useEffect(() => {
         if (nameSubmitted && sfuSessionId && config && !callStartedRef.current) {
@@ -174,6 +182,8 @@ function MeetingRoomInner() {
                     if (prev === null || prev <= 1) {
                         clearInterval(timerRef.current);
                         setShowTimesUp(true);
+                        // Immediately disconnect all WebRTC connections
+                        disconnectRef.current();
                         return 0;
                     }
                     return prev - 1;
@@ -470,6 +480,17 @@ function MeetingRoomInner() {
                         <h2>Time&apos;s Up!</h2>
                         <p>
                             Your meeting has reached the {config ? Math.floor(config.callMaxDurationSeconds / 60) : 5}-minute limit.
+                        </p>
+                        <p style={{ fontSize: "0.85rem", color: "#6b7280", marginBottom: "1.5rem" }}>
+                            Want unlimited meetings? Deploy your own instance for free!<br />
+                            <a
+                                href="https://github.com/casperm/skive-meeting"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: "#00B667", fontWeight: 600 }}
+                            >
+                                github.com/casperm/skive-meeting
+                            </a>
                         </p>
                         <button
                             className="btn btn-danger"
