@@ -25,21 +25,24 @@ export function VideoTile({
         if (videoRef.current && stream) {
             videoRef.current.srcObject = stream;
         }
-    }, [stream]);
+    }, [stream, videoEnabled]);
 
     const initial = name.charAt(0).toUpperCase();
 
     return (
         <div className="video-tile">
-            {stream && videoEnabled ? (
-                <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted={isLocal}
-                    style={{ transform: isLocal ? "scaleX(-1)" : "none" }}
-                />
-            ) : (
+            {/* Always keep video element mounted so srcObject binding is preserved */}
+            <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted={isLocal}
+                style={{
+                    transform: isLocal ? "scaleX(-1)" : "none",
+                    display: stream && videoEnabled ? "block" : "none",
+                }}
+            />
+            {(!stream || !videoEnabled) && (
                 <div className="video-tile-avatar">{initial}</div>
             )}
             <div className="video-tile-info">

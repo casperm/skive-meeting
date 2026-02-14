@@ -10,7 +10,7 @@ interface TrackInfo {
 }
 
 interface RemoteStream {
-    peerId: string;
+    peerId: string; // This is the remote peer's SFU sessionId
     stream: MediaStream;
 }
 
@@ -20,6 +20,10 @@ export function useCallsSfu() {
     const [remoteStreams, setRemoteStreams] = useState<RemoteStream[]>([]);
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const sessionIdRef = useRef<string | null>(null);
+    // Map from transceiver mid → remote peer's SFU sessionId
+    const midToSessionIdRef = useRef<Map<string, string>>(new Map());
+    // Map from remote SFU sessionId → MediaStream (to group audio+video per peer)
+    const peerStreamsRef = useRef<Map<string, MediaStream>>(new Map());
 
     const createSession = useCallback(async () => {
         try {
@@ -37,15 +41,34 @@ export function useCallsSfu() {
             pcRef.current = pc;
 
             pc.ontrack = (event) => {
-                // Remote track received
-                const stream = event.streams[0];
-                if (stream) {
-                    setRemoteStreams((prev) => {
-                        const existing = prev.find((r) => r.stream.id === stream.id);
-                        if (existing) return prev;
-                        return [...prev, { peerId: stream.id, stream }];
-                    });
+                const transceiver = event.transceiver;
+                const mid = transceiver.mid;
+                if (!mid) return;
+
+                // Look up which remote peer this track belongs to
+                const remotePeerId = midToSessionIdRef.current.get(mid);
+                if (!remotePeerId) {
+                    console.warn("Received track with unknown mid:", mid);
+                    return;
                 }
+
+                // Get or create a MediaStream for this peer
+                const existingStream = peerStreamsRef.current.get(remotePeerId);
+
+                // Create a NEW MediaStream to ensure React triggers re-render/useEffect
+                const newStream = new MediaStream(existingStream ? existingStream.getTracks() : []);
+                newStream.addTrack(event.track);
+
+                peerStreamsRef.current.set(remotePeerId, newStream);
+
+                // Update state
+                setRemoteStreams(() => {
+                    const streams: RemoteStream[] = [];
+                    for (const [peerId, stream] of peerStreamsRef.current) {
+                        streams.push({ peerId, stream });
+                    }
+                    return streams;
+                });
             };
 
             return sid;
@@ -61,20 +84,23 @@ export function useCallsSfu() {
         if (!pc || !sid) return null;
 
         // Add tracks to PeerConnection
-        const tracks: Array<{ location: string; trackName: string; mid?: string }> = [];
+        const transceivers: Array<{ transceiver: RTCRtpTransceiver; kind: string }> = [];
 
         localStream.getTracks().forEach((track) => {
             const transceiver = pc.addTransceiver(track, { direction: "sendonly" });
-            tracks.push({
-                location: "local",
-                trackName: `${track.kind}-${crypto.randomUUID().slice(0, 8)}`,
-                mid: transceiver.mid ?? undefined,
-            });
+            transceivers.push({ transceiver, kind: track.kind });
         });
 
         // Create offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+
+        // Map transceivers to track names (MID is now available after setLocalDescription)
+        const tracks = transceivers.map(({ transceiver, kind }) => ({
+            location: "local",
+            trackName: `${kind}-${crypto.randomUUID().slice(0, 8)}`,
+            mid: transceiver.mid ?? undefined,
+        }));
 
         // Send to server
         try {
@@ -142,6 +168,18 @@ export function useCallsSfu() {
 
             const data = await res.json();
 
+            // Map MIDs from the response to remote peer sessionIds
+            if (data.tracks) {
+                data.tracks.forEach((t: { mid: string; sessionId?: string }, index: number) => {
+                    const mid = t.mid;
+                    // The sessionId for this track comes from our original request
+                    const remoteSessionId = tracksToRequest[index]?.sessionId;
+                    if (mid && remoteSessionId) {
+                        midToSessionIdRef.current.set(mid, remoteSessionId);
+                    }
+                });
+            }
+
             if (data.requiresImmediateRenegotiation && data.sessionDescription) {
                 // Set the new offer from SFU
                 await pc.setRemoteDescription(
@@ -170,6 +208,15 @@ export function useCallsSfu() {
         }
     }, []);
 
+    const stopRemoteStream = useCallback((peerId: string) => {
+        const stream = peerStreamsRef.current.get(peerId);
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+            peerStreamsRef.current.delete(peerId);
+            setRemoteStreams(prev => prev.filter(s => s.peerId !== peerId));
+        }
+    }, []);
+
     const cleanup = useCallback(() => {
         if (pcRef.current) {
             pcRef.current.close();
@@ -177,7 +224,13 @@ export function useCallsSfu() {
         }
         setSessionId(null);
         sessionIdRef.current = null;
+
+        peerStreamsRef.current.forEach(stream => {
+            stream.getTracks().forEach(t => t.stop());
+        });
+        peerStreamsRef.current.clear();
         setRemoteStreams([]);
+        midToSessionIdRef.current.clear();
     }, []);
 
     useEffect(() => {
@@ -195,6 +248,7 @@ export function useCallsSfu() {
         createSession,
         pushLocalTracks,
         pullRemoteTracks,
+        stopRemoteStream,
         cleanup,
     };
 }

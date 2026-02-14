@@ -56,6 +56,7 @@ function MeetingRoomInner() {
         createSession,
         pushLocalTracks,
         pullRemoteTracks,
+        stopRemoteStream,
         cleanup: cleanupSfu,
     } = useCallsSfu();
 
@@ -135,6 +136,9 @@ function MeetingRoomInner() {
         }
     }, [localStream, sfuSessionId, nameSubmitted, createSession, pushLocalTracks, sendMessage]);
 
+    // Track which tracks we've already requested to avoid redundant pulls
+    const pulledTracksRef = useRef<Set<string>>(new Set());
+
     // Pull remote tracks when room state changes
     useEffect(() => {
         if (!roomState || !sfuSessionId) return;
@@ -142,23 +146,36 @@ function MeetingRoomInner() {
         const currentUsers = roomState.users;
         const prevUsers = prevUsersRef.current;
 
+        // Cleanup: Identify users who left and stop their streams
+        const currentIds = new Set(currentUsers.map(u => u.id));
+        prevUsers.forEach((u: UserInfo) => {
+            if (!currentIds.has(u.id) && u.tracks.sessionId) {
+                stopRemoteStream(u.tracks.sessionId);
+                // Also clear from pulled tracks cache
+                if (u.tracks.audioTrackName) pulledTracksRef.current.delete(`${u.tracks.sessionId}:${u.tracks.audioTrackName}`);
+                if (u.tracks.videoTrackName) pulledTracksRef.current.delete(`${u.tracks.sessionId}:${u.tracks.videoTrackName}`);
+            }
+        });
+
         const newRemoteTracks: { sessionId: string; trackName: string }[] = [];
 
         for (const user of currentUsers) {
-            if (user.tracks.sessionId && user.tracks.sessionId !== sfuSessionId) {
-                const prevUser = prevUsers.find((u) => u.id === user.id);
-                if (!prevUser || prevUser.tracks.sessionId !== user.tracks.sessionId) {
-                    if (user.tracks.audioTrackName) {
-                        newRemoteTracks.push({
-                            sessionId: user.tracks.sessionId,
-                            trackName: user.tracks.audioTrackName,
-                        });
+            const sid = user.tracks.sessionId;
+            if (sid && sid !== sfuSessionId) {
+                // Audio track
+                if (user.tracks.audioTrackName) {
+                    const key = `${sid}:${user.tracks.audioTrackName}`;
+                    if (!pulledTracksRef.current.has(key)) {
+                        newRemoteTracks.push({ sessionId: sid, trackName: user.tracks.audioTrackName });
+                        pulledTracksRef.current.add(key);
                     }
-                    if (user.tracks.videoTrackName) {
-                        newRemoteTracks.push({
-                            sessionId: user.tracks.sessionId,
-                            trackName: user.tracks.videoTrackName,
-                        });
+                }
+                // Video track
+                if (user.tracks.videoTrackName) {
+                    const key = `${sid}:${user.tracks.videoTrackName}`;
+                    if (!pulledTracksRef.current.has(key)) {
+                        newRemoteTracks.push({ sessionId: sid, trackName: user.tracks.videoTrackName });
+                        pulledTracksRef.current.add(key);
                     }
                 }
             }
@@ -169,7 +186,7 @@ function MeetingRoomInner() {
         }
 
         prevUsersRef.current = currentUsers;
-    }, [roomState, sfuSessionId, pullRemoteTracks]);
+    }, [roomState, sfuSessionId, pullRemoteTracks, stopRemoteStream]);
 
     // Update tracks state when toggling
     useEffect(() => {
@@ -343,11 +360,11 @@ function MeetingRoomInner() {
                         />
 
                         {/* Remote videos */}
-                        {otherUsers.map((user, index) => (
+                        {otherUsers.map((user) => (
                             <VideoTile
                                 key={user.id}
                                 name={user.name}
-                                stream={remoteStreams[index]?.stream}
+                                stream={remoteStreams.find((r) => r.peerId === user.tracks.sessionId)?.stream}
                                 audioEnabled={user.tracks.audioEnabled}
                                 videoEnabled={user.tracks.videoEnabled}
                             />
