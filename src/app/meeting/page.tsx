@@ -2,10 +2,11 @@
 
 import { useState, useCallback, useRef, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Copy, Users } from "lucide-react";
+import { Copy, Users, QrCode } from "lucide-react";
 import { VideoTile } from "@/components/VideoTile";
 import { ControlsBar } from "@/components/ControlsBar";
 import { Whiteboard } from "@/components/Whiteboard";
+import { QRCodeModal } from "@/components/QRCodeModal";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useMediaDevices } from "@/hooks/useMediaDevices";
 import { useCallsSfu } from "@/hooks/useCallsSfu";
@@ -25,6 +26,7 @@ function MeetingRoomInner() {
     // Meeting state
     const [roomState, setRoomState] = useState<MeetingState | null>(null);
     const [whiteboardOpen, setWhiteboardOpen] = useState(false);
+    const [qrModalOpen, setQrModalOpen] = useState(false);
     const [remoteElements, setRemoteElements] = useState<unknown[] | undefined>();
     const [initialWhiteboardElements, setInitialWhiteboardElements] = useState<unknown[] | undefined>();
     const initialElementsLoadedRef = useRef(false);
@@ -302,11 +304,27 @@ function MeetingRoomInner() {
                     <button className="meeting-id-badge" onClick={handleCopyLink} title="Copy meeting link">
                         {meetingId} <Copy size={12} style={{ marginLeft: "4px", opacity: 0.6 }} />
                     </button>
+                    <button
+                        className="meeting-id-badge"
+                        onClick={() => setQrModalOpen(true)}
+                        title="Show join QR code"
+                        style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                    >
+                        <QrCode size={12} /> QR
+                    </button>
                     {!connected && (
                         <span style={{ fontSize: "0.75rem", color: "#f87171" }}>Reconnecting...</span>
                     )}
                 </div>
             </div>
+
+            {/* QR Code Modal */}
+            {qrModalOpen && (
+                <QRCodeModal
+                    url={`${window.location.origin}/meeting?id=${meetingId}`}
+                    onClose={() => setQrModalOpen(false)}
+                />
+            )}
 
             {/* Body */}
             <div className={`meeting-body ${whiteboardOpen ? "meeting-body--whiteboard" : ""}`}>
