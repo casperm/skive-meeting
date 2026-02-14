@@ -18,6 +18,17 @@ Skive is a lightweight, edge-native video meeting application built for speed an
 
 ---
 
+## Screenshots
+
+![Skive Landing Page](./.screen_capture/landing_page.png)
+*Landing page with "Start Meeting" and "Join Meeting" options.*
+
+![Skive Meeting Room](./.screen_capture/meeting_room.png)
+*Active meeting room with participant grid and collaborative whiteboard.*
+
+
+---
+
 ## Cost Estimation (Cloudflare Calls)
 
 Skive uses **Cloudflare Calls** for its SFU (Selective Forwarding Unit) capabilities.
@@ -41,16 +52,6 @@ Skive uses **Cloudflare Calls** for its SFU (Selective Forwarding Unit) capabili
 - **Data**: ~79.1 GB.
 - **Cost**: $0.00 (Covered by the massive 1 TB free tier).
 - **Overages**: If you exceed the free tier, this meeting would cost approx. **$3.96**.
-
----
-
-## Screenshots
-
-![Skive Landing Page](./.screen_capture/landing_page.png)
-*Landing page with "Start Meeting" and "Join Meeting" options.*
-
-![Skive Meeting Room](./.screen_capture/meeting_room.png)
-*Active meeting room with participant grid and collaborative whiteboard.*
 
 ---
 
